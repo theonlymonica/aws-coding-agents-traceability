@@ -1,0 +1,35 @@
+# The box of the complete agent (agent/boxed.py, the mode `agent`). The entry point of the container writes the
+# values in the place of the names with two underscores, and gives the file to `box run`.
+name = "agentfarm-agent"
+# The state of the box. The agent cannot reach it.
+box_dir = "__RUN__/state"
+policy = "policy.dw"
+
+[experimental-features]
+ingress = true
+
+[agent]
+# The agent: the HTTP server of the agent runtime and the work of a session, one process.
+command = ["__PYTHON__", "__APP__/main.py"]
+workspace = "__RUN__/work"
+env = { __ENV__ }
+
+# The box listens on the port of AgentCore Runtime and relays each connection to the port of the agent.
+[[agent.ingress]]
+listen = "0.0.0.0:8080"
+workload_port = 8081
+
+# What the agent can touch without a decision of the policy: the Python of the image, its own code, and its
+# own temporary directories.
+[agent.filesystem]
+read = ["__PREFIX__/lib", "__PREFIX__/bin", "/usr/lib/aarch64-linux-gnu", "__APP__", "__RUN__/work", "__RUN__/tmp", "__RUN__/home"]
+read_file = ["/etc/ld.so.cache"]
+exec = ["__PREFIX__/bin", "__PREFIX__/lib"]
+write = ["__RUN__/work", "__RUN__/tmp", "__RUN__/home"]
+
+# The gateway of the box signs the requests to these three services with the credentials that the microVM
+# gives to the box process (the default credential chain of the AWS SDK). The agent has placeholder keys. The
+# gateway of the system (an MCP request with the JWT) and the package index get no credential of the box.
+[egress.aws]
+destinations = ["sts.__REGION__.amazonaws.com", "bedrock-runtime.__REGION__.amazonaws.com", "bedrock-agentcore.__REGION__.amazonaws.com"]
+secret.ref = "aws://"

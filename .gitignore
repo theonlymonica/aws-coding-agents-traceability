@@ -1,0 +1,9 @@
+.venv/
+.build/
+cdk.out/
+cdk.context.json
+__pycache__/
+.ruff_cache/
+.DS_Store
+# The records of the test runs: they have the IDs of the account, of the sessions and of the repositories
+evidence/

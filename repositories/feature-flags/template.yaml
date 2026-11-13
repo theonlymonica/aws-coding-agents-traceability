@@ -1,0 +1,15 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Feature flags of the shop
+
+Parameters:
+  SessionId:
+    Type: String
+    Description: The deployment broker sets this value. Do not change this parameter.
+
+Resources:
+  Flags:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/agentfarm/${SessionId}/flags"
+      Type: String
+      Value: '{"dark_mode": false, "new_checkout": false}'

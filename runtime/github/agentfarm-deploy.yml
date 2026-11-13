@@ -1,0 +1,84 @@
+# Deploys the live environment of this repository after a merge to the branch main.
+#
+# A session of an agent ends with a pull request and with a stack of the session: a test copy of the
+# application. A person reviews and merges the pull request. The merge is a push to main, and it starts this
+# workflow:
+#
+#   1. it deploys the file template.yaml of the merged commit to the live stack of this repository;
+#   2. it deletes the stack of the session whose commits the merged pull request has.
+#
+# The job gets AWS credentials with the OIDC token of GitHub Actions: the role below trusts only a workflow of
+# this repository that runs from the branch main. The role can change one stack, the live stack, and it can
+# delete only a stack that has the tag of this repository. The name of the role session is the merged commit,
+# so AWS CloudTrail shows which commit a deployment came from.
+name: agentfarm-deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write       # the OIDC token for AWS
+  contents: read
+  pull-requests: read   # the pull request of the merged commit
+
+concurrency: agentfarm-deploy   # one deployment at a time
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      LIVE_STACK: __STACK_PREFIX____ENVIRONMENT__
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: __ROLE_ARN__
+          aws-region: __REGION__
+          role-session-name: merge-${{ github.sha }}
+      - name: Deploy the live environment
+        run: |
+          aws cloudformation deploy --stack-name "$LIVE_STACK" --template-file template.yaml \
+            --parameter-overrides SessionId=__ENVIRONMENT__ --no-fail-on-empty-changeset \
+            --tags commit_id="$GITHUB_SHA" repository=__REPOSITORY__
+      - name: Delete the stack of the session of the merged pull request
+        # The session of a pull request is not the name of its branch: a person can give a branch every name.
+        # It is the session of the commits that the broker wrote. Such a commit has a signature of GitHub, the
+        # GitHub App of an agent as its author (`__APP_PREFIX__<agent ID>[bot]`), and the two identity lines of
+        # the broker at the end of its message. Only a value with the form of a session ID becomes the name of
+        # a stack.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SESSIONS_OF_THE_BROKER: >-
+            .[] | select(.commit.verification.verified == true and .author.type == "Bot")
+            | .author.login as $login
+            | (.commit.message | capture("Agent-Id: (?<agent>[a-z0-9-]+)\nSession-Id: (?<session>[0-9a-f-]{36})\\s*$")?)
+            | select($login == "__APP_PREFIX__\(.agent)[bot]") | .session
+        run: |
+          # GitHub sometimes gives an incomplete answer: ask again before the step fails.
+          ask() {
+            local answer="$1"; shift
+            for attempt in 1 2 3 4; do
+              if "$@" > "$answer"; then return 0; fi
+              sleep 10
+            done
+            return 1
+          }
+          ask pulls.txt gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[] | select(.merged_at != null) | .number'
+          : > sessions.txt
+          while read -r number; do
+            ask commits.txt gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$number/commits" --jq "$SESSIONS_OF_THE_BROKER"
+            cat commits.txt >> sessions.txt
+          done < pulls.txt
+          sort -u sessions.txt | while read -r session; do
+            if [[ "$session" =~ ^[0-9a-f-]{36}$ ]]; then
+              stack="__STACK_PREFIX__$session"
+              if aws cloudformation describe-stacks --stack-name "$stack" > /dev/null 2>&1; then
+                echo "Delete the stack $stack"
+                aws cloudformation delete-stack --stack-name "$stack"
+                aws cloudformation wait stack-delete-complete --stack-name "$stack"
+              else
+                echo "The stack $stack is not there"
+              fi
+            fi
+          done

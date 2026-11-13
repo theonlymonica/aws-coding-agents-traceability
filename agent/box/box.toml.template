@@ -1,0 +1,27 @@
+# The box of the work of a session (agent/boxed.py). The server of the agent runtime writes the values of a
+# session in the place of the names with two underscores, and gives the file to `box run`.
+name = "agentfarm-session"
+# The state of the box. The process of the work cannot reach it.
+box_dir = "__RUN__/state"
+policy = "policy.dw"
+
+[agent]
+# The process of the work: the agent, with the arguments of the session in a file.
+command = ["__PYTHON__", "__APP__/runtime_server.py", "work", "__RUN__/work/request.json"]
+workspace = "__RUN__/work"
+env = { __ENV__ }
+
+# What the process can touch without a decision of the policy: the Python of the image, the code of the
+# agent, and its own temporary directories. Not the directory `private` of the session, with the profile file.
+[agent.filesystem]
+read = ["__PREFIX__/lib", "__PREFIX__/bin", "/usr/lib/aarch64-linux-gnu", "__APP__", "__RUN__/work", "__RUN__/tmp", "__RUN__/home"]
+read_file = ["/etc/ld.so.cache"]
+exec = ["__PREFIX__/bin", "__PREFIX__/lib"]
+write = ["__RUN__/work", "__RUN__/tmp", "__RUN__/home"]
+
+# The gateway of the box signs the requests to these three services with the credentials of the runtime
+# session. The process has placeholder keys. The gateway of the system (an MCP request with the JWT) and the
+# package index get no credential of the box.
+[egress.aws]
+destinations = ["sts.__REGION__.amazonaws.com", "bedrock-runtime.__REGION__.amazonaws.com", "bedrock-agentcore.__REGION__.amazonaws.com"]
+secret.ref = "aws://__PROFILE__"

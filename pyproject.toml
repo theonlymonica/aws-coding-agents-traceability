@@ -1,0 +1,12 @@
+[project]
+name = "agentfarm"
+version = "0.1.0"
+description = "AI coding agents on AWS with agent and session traceability in AWS CloudTrail and on GitHub"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "aws-cdk-lib>=2.270,<2.276",
+    "constructs>=10",
+    "boto3>=1.40",
+    "PyJWT[crypto]>=2.10",
+]

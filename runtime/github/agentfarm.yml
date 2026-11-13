@@ -1,0 +1,44 @@
+# Starts a session of an agent when an issue of this repository gets the label `agentfarm`.
+#
+# The job gets AWS credentials with the OIDC token of GitHub Actions: the role below trusts only a workflow of
+# this repository that runs from the branch main, and it can do one thing, invoke the session starter for the
+# use case of this repository. The text of the issue is the task of the session.
+name: agentfarm
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  id-token: write   # the OIDC token for AWS
+  contents: read
+
+jobs:
+  start-session:
+    if: github.event.label.name == 'agentfarm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: __ROLE_ARN__
+          aws-region: __REGION__
+          # The name of the role session has the issue and the run: AWS CloudTrail then shows which issue and
+          # which run of this workflow asked for the credentials.
+          role-session-name: issue-${{ github.event.issue.number }}-run-${{ github.run_id }}
+      - name: Start a session of the agent
+        # The values of the issue are environment variables, not text of the script: a title or a body cannot
+        # change the commands of this step.
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          REQUESTED_BY: ${{ github.event.sender.login }}
+        run: |
+          jq -n --arg agent_id "__AGENT_ID__" --arg requested_by "$REQUESTED_BY" --argjson number "$ISSUE_NUMBER" \
+            --arg title "$ISSUE_TITLE" --arg body "$ISSUE_BODY" --arg url "$ISSUE_URL" \
+            '{agent_id: $agent_id, requested_by: $requested_by, issue: {number: $number, title: $title, body: $body, url: $url}}' > request.json
+          aws lambda invoke --function-name __STARTER_FUNCTION__ --qualifier __USE_CASE__ \
+            --cli-binary-format raw-in-base64-out --payload file://request.json answer.json > /dev/null
+          cat answer.json
+          jq -e '.session_id' answer.json > /dev/null

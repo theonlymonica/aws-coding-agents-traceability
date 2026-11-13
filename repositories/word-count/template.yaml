@@ -1,0 +1,15 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Configuration of the word count library
+
+Parameters:
+  SessionId:
+    Type: String
+    Description: The deployment broker sets this value. Do not change this parameter.
+
+Resources:
+  Version:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/agentfarm/${SessionId}/word-count-version"
+      Type: String
+      Value: "1.0.0"
