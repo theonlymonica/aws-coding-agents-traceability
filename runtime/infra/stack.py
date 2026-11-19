@@ -6,8 +6,9 @@ session starter Lambda      makes the session ID, writes the session to the sess
    ▼
 agent runtime of one agent, platform version V2     one runtime session = one microVM = one session
    │ GetWebIdentityToken(tags: agent_id, session_id, repository), for every request ──▶ AWS STS
-   │     IAM allows only: the agent of this runtime, the runtime session ID of this session
-   │     (`aws:AgentCoreRuntimeSourceSid`), a repository of this agent
+   │     IAM allows only: a runtime session of this agent runtime (`aws:AgentCoreRuntimeSourceArn`), the
+   │     agent of this runtime, the runtime session ID of this session (`aws:AgentCoreRuntimeSourceSid`),
+   │     a repository of this agent
    │ MCP tools/call, Authorization: Bearer JWT
    ▼
 AgentCore Gateway ──▶ request interceptor ──▶ Broker Lambda ──▶ AssumeRole(agent role, SourceIdentity = agent_id,
@@ -298,26 +299,6 @@ class RuntimeStack(Stack):
                     "StringEquals": {"aws:SourceAccount": self.account},
                     "ArnLike": {"aws:SourceArn": f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:*"}}))
             for statement in (
-                # The JWT of a session: one audience, 900 seconds at most, all three tags.
-                iam.PolicyStatement(
-                    actions=["sts:GetWebIdentityToken"], resources=["*"],
-                    conditions={
-                        "ForAllValues:StringEquals": {"sts:IdentityTokenAudience": AUDIENCE},
-                        "Null": {"sts:IdentityTokenAudience": "false",
-                                 **{f"aws:RequestTag/{tag}": "false" for tag in JWT_TAGS}},
-                        "NumericLessThanEquals": {"sts:DurationSeconds": str(TOKEN_LIFETIME_SECONDS)},
-                        "StringEquals": {"sts:SigningAlgorithm": "ES384"}}),
-                # The tags of the JWT: this agent, a repository of this agent, and the runtime session ID of
-                # the session that has the credentials. Credentials without the session context key match no value.
-                iam.PolicyStatement(
-                    actions=["sts:TagGetWebIdentityToken"], resources=["*"],
-                    conditions={
-                        "ForAllValues:StringEquals": {"aws:TagKeys": JWT_TAGS},
-                        "StringEquals": {
-                            "aws:RequestTag/agent_id": agent_id,
-                            "aws:RequestTag/repository": [repository_names[u] for u in agent_use_cases],
-                            "aws:RequestTag/session_id": "${aws:AgentCoreRuntimeSourceSid}"},
-                        "Null": {"aws:AgentCoreRuntimeSourceSid": "false"}}),
                 # The model of the agent: one inference profile and the foundation model behind it.
                 iam.PolicyStatement(actions=["bedrock:InvokeModel"], resources=[inference_profile_arn]),
                 iam.PolicyStatement(
@@ -361,6 +342,34 @@ class RuntimeStack(Stack):
                     "AGENT_BOX": box_mode if agent_id in (box_agents or []) else "none"})
             runtime.node.add_dependency(role)
             runtimes[agent_id] = runtime
+            # The JWT of a session, for the runtime sessions of this agent runtime only. A different agent runtime
+            # with the same execution role has credentials of the same role, and its caller selects the runtime
+            # session ID: without the ARN of this agent runtime, it gets the JWT of any session of this agent.
+            # A policy of its own: it names the agent runtime, and the agent runtime needs the role before it exists.
+            this_runtime = {"aws:AgentCoreRuntimeSourceArn": runtime.attr_agent_runtime_arn}
+            iam.Policy(self, f"SessionTokenPolicy-{agent_id}", roles=[role], statements=[
+                # One audience, 900 seconds at most, all three tags.
+                iam.PolicyStatement(
+                    actions=["sts:GetWebIdentityToken"], resources=["*"],
+                    conditions={
+                        "ArnEquals": this_runtime,
+                        "ForAllValues:StringEquals": {"sts:IdentityTokenAudience": AUDIENCE},
+                        "Null": {"sts:IdentityTokenAudience": "false",
+                                 **{f"aws:RequestTag/{tag}": "false" for tag in JWT_TAGS}},
+                        "NumericLessThanEquals": {"sts:DurationSeconds": str(TOKEN_LIFETIME_SECONDS)},
+                        "StringEquals": {"sts:SigningAlgorithm": "ES384"}}),
+                # The tags of the JWT: this agent, a repository of this agent, and the runtime session ID of
+                # the session that has the credentials. Credentials without the session context keys match no value.
+                iam.PolicyStatement(
+                    actions=["sts:TagGetWebIdentityToken"], resources=["*"],
+                    conditions={
+                        "ArnEquals": this_runtime,
+                        "ForAllValues:StringEquals": {"aws:TagKeys": JWT_TAGS},
+                        "StringEquals": {
+                            "aws:RequestTag/agent_id": agent_id,
+                            "aws:RequestTag/repository": [repository_names[u] for u in agent_use_cases],
+                            "aws:RequestTag/session_id": "${aws:AgentCoreRuntimeSourceSid}"},
+                        "Null": {"aws:AgentCoreRuntimeSourceSid": "false"}})])
             # The policy of the agent runtime: only the session starter sends it a request, and nobody runs a
             # command in the microVM of a session. Without it, a principal of the account with AgentCore
             # permissions reaches the microVM of an active session, where the credentials of the session are.
@@ -509,6 +518,7 @@ class RuntimeStack(Stack):
             "AgentId": first_agent,
             "AgentRuntimeArn": runtimes[first_agent].attr_agent_runtime_arn,
             "AgentRuntimeId": runtimes[first_agent].attr_agent_runtime_id,
+            "AgentRuntimeArns": self.to_json_string({agent: r.attr_agent_runtime_arn for agent, r in runtimes.items()}),
             "ExecutionRoleArn": names.role_arn(self.account, f"{names.RUNTIME_TOKEN_ROLE_PREFIX}{first_agent}"),
             "AgentRoleArn": agent_role.role_arn,
             "BrokerRoleArn": broker_role.role_arn,

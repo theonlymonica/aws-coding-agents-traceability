@@ -22,7 +22,7 @@ export PYTHONUNBUFFERED = 1
 # npx fetches a CDK CLI that matches aws-cdk-lib, independent of a global installation.
 CDK = npx --yes aws-cdk@2.1148.1
 
-.PHONY: build unit destroy runtime-deploy runtime-chain runtime-agent runtime-hostile runtime-issue runtime-merge runtime-secret-reference runtime-trail runtime-agents runtime-sessions
+.PHONY: build unit destroy runtime-deploy runtime-chain runtime-agent runtime-hostile runtime-issue runtime-merge runtime-secret-reference runtime-trail runtime-agents runtime-sessions runtime-foreign
 
 # Packages of the Lambda functions. No Docker, no installation at run time.
 #   broker       handler, GitHub client and JWT verification, plus PyJWT and cryptography as Linux wheels
@@ -111,3 +111,10 @@ runtime-agents:
 # asks for the SSM parameter of the first. Writes evidence/runtime/sessions-<start time>.json.
 runtime-sessions:
 	uv run python runtime/tests/run_sessions.py
+
+# A second agent runtime with the execution role of an agent, invoked with the ID of an existing session of that
+# agent: IAM must deny it the JWT of the session. The script deletes the second agent runtime at the end.
+# Writes evidence/runtime/foreign-runtime-<start time>.json.
+#   make runtime-foreign [AGENT=agent-beta]
+runtime-foreign:
+	uv run python runtime/tests/run_foreign_runtime.py $(if $(AGENT),--agent $(AGENT))

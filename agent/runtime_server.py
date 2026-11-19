@@ -3,9 +3,10 @@
 AgentCore Runtime starts one microVM for each runtime session and sends the requests of the session
 to this server: GET /ping and POST /invocations on port 8080. The runtime has the platform version
 V2: the credentials of the execution role that a session receives have the IAM context keys
-`aws:AgentCoreRuntimeSourceSid` (the runtime session ID) and `aws:AgentCoreRuntimeSourceArn`. The
-policy of the execution role lets a session request an STS-signed JWT only with its own runtime
-session ID as the session ID.
+`aws:AgentCoreRuntimeSourceSid` (the runtime session ID) and `aws:AgentCoreRuntimeSourceArn` (the ARN
+of the agent runtime). The policy of the execution role lets a session request an STS-signed JWT only
+with its own runtime session ID as the session ID, and only in the agent runtime of its agent: a
+different agent runtime with the same execution role gets no JWT.
 
 Requests (POST /invocations, JSON with the field `action`):
 

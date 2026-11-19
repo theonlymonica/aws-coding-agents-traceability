@@ -200,6 +200,7 @@ def main() -> int:
             PolicySourceArn=f"arn:aws:iam::{account}:role/{RUNTIME_TOKEN_ROLE_PREFIX}{agent}", ActionNames=["sts:TagGetWebIdentityToken"],
             ContextEntries=[entry("aws:RequestTag/agent_id", agent), entry("aws:RequestTag/session_id", session_tag),
                             entry("aws:RequestTag/repository", name), entry("aws:AgentCoreRuntimeSourceSid", runtime_session),
+                            entry("aws:AgentCoreRuntimeSourceArn", json.loads(config["AgentRuntimeArns"])[agent]),
                             entry("aws:TagKeys", ["agent_id", "session_id", "repository"], "stringList")])["EvaluationResults"][0]["EvalDecision"]
 
     simulated = {"the second session asks for a JWT with its own ID": may_tag(second, second),

@@ -165,6 +165,7 @@ def main() -> int:
 
     # ---- A5: IAM, by the policy simulator
     iam, simulated, passed = session_api.client("iam"), {}, True
+    runtime_arns = json.loads(config["AgentRuntimeArns"])
     sid = sessions[first]["session_id"]
 
     def may_tag(agent: str, agent_tag: str, repository_tag: str) -> str:
@@ -173,6 +174,7 @@ def main() -> int:
             PolicySourceArn=f"arn:aws:iam::{account}:role/{RUNTIME_TOKEN_ROLE_PREFIX}{agent}", ActionNames=["sts:TagGetWebIdentityToken"],
             ContextEntries=[entry("aws:RequestTag/agent_id", agent_tag), entry("aws:RequestTag/session_id", sid),
                             entry("aws:RequestTag/repository", repository_tag), entry("aws:AgentCoreRuntimeSourceSid", sid),
+                            entry("aws:AgentCoreRuntimeSourceArn", runtime_arns[agent]),
                             entry("aws:TagKeys", ["agent_id", "session_id", "repository"], "stringList")])
         return answer["EvaluationResults"][0]["EvalDecision"]
 

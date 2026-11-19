@@ -73,7 +73,8 @@ AgentCore Runtime, agent runtime of one agent, platform version V2      one sess
    │
    │ for every request to the gateway:
    │ GetWebIdentityToken(tags: agent_id, session_id, repository), 300 seconds ──▶ AWS STS
-   │     IAM allows only: the agent of this runtime, the runtime session ID of this session
+   │     IAM allows only: a runtime session of this agent runtime (aws:AgentCoreRuntimeSourceArn),
+   │     the agent of this runtime, the runtime session ID of this session
    │     (aws:AgentCoreRuntimeSourceSid), a repository of this agent
    │ MCP tools/call, Authorization: Bearer JWT
    ▼
@@ -114,7 +115,7 @@ CloudFormation, and SSM through CloudFormation
 | --- | --- | --- |
 | `agentfarm-github-<use case>` | The workflow `agentfarm` of one repository. The trust policy allows only the OIDC token of GitHub Actions of a workflow of that repository that runs from the branch `main` | Invoke the alias `<use case>` of the session starter |
 | `agentfarm-runtime-starter` | Session starter Lambda | Write a session to the session table: the policy of the table lets only this role and the role of the broker write. Invoke the agent runtimes: the policy of an agent runtime lets only this role send it a request |
-| `agentfarm-runtime-exec-<agent_id>` | The agent runtime of one agent | Request a JWT for one audience, 900 seconds at most, with exactly this agent ID, the runtime session ID of the session that has the credentials, and a repository of the agent as tags. `bedrock:InvokeModel` on the model of the agent. Start, use and stop a session of the workspace. Pull the image, write the log of its own agent runtime |
+| `agentfarm-runtime-exec-<agent_id>` | The agent runtime of one agent | Request a JWT for one audience, 900 seconds at most, with exactly this agent ID, the runtime session ID of the session that has the credentials, and a repository of the agent as tags, only in a runtime session of the agent runtime of the agent. `bedrock:InvokeModel` on the model of the agent. Start, use and stop a session of the workspace. Pull the image, write the log of its own agent runtime |
 | `agentfarm-runtime-broker` | Broker Lambda | `sts:AssumeRole` and `sts:SetSourceIdentity` on the agent role, only with credentials that Lambda delivered to the broker function (`lambda:SourceFunctionArn`). Read the session table and end a session. Write its own log |
 | `agentfarm-runtime-agent` | Sessions that the broker creates | CloudFormation on `agentfarm-*` stacks, SSM parameters under `/agentfarm/`, the IDs and the KMS keys of the GitHub Apps. The broker requests credentials for one purpose. For the stack: the session policy allows the stack `agentfarm-<session_id>` and the SSM path `/agentfarm/<session_id>/` only. For the repository: the two SSM parameters with the IDs of the GitHub App of its agent, and a signature with the KMS key of its agent, only for a request that an AWS service does not send for the session |
 | `agentfarm-runtime-interceptor`, `agentfarm-runtime-gateway` | Interceptor Lambda, AgentCore Gateway | No permissions; invoke the interceptor and the broker |
@@ -340,6 +341,7 @@ account and of the sessions of the person who ran it.
 | `make runtime-secret-reference` | One scripted session whose template has, as the value of its SSM parameter, a dynamic reference to a value of the GitHub App of its agent: the SSM parameter with the ID of the App (an identifier, not the private key) | K1 the session committed the template and asked for the deployment. K2 the stack is not complete, because the session is not authorized to read the value. K3 the session has no SSM parameter. K4 CloudTrail has the read through AWS CloudFormation as denied, and the reads of the broker as allowed |
 | `make runtime-sessions` | Two scripted sessions of the same agent, at the same time and in the same repository; then two more sessions of the same agent, whose templates name a parameter in the path of the first session | P1 the two sessions run at the same time, and each does its work. P2 each session has its own branch, commit, pull request, stack and SSM parameter, and nothing of the other. P3 a session cannot make a new parameter in the path of a different session: IAM denies the request. P4 a session cannot take the parameter of a different session: its stack fails, and the parameter is not changed. P5 by the policy simulator of IAM, a session requests a JWT only with its own session ID. P6 CloudTrail has only the resources of a session in its events, and the denied request with the ID of the session that sent it |
 | `make runtime-agents` | One scripted session of each of two agents, at the same time and in the same repository | A1 each session does its work. A2 the commit and the pull request of each session have the GitHub App of its agent, with a signature of GitHub. A3 the stack of each session has the tag of its agent. A4 the session starter gives an agent no session for a use case that is not its own, and does not give the state of a session under the name of a different agent. A5 by the policy simulator of IAM, the execution role of an agent requests a JWT only with its own agent ID and a repository of its own. A6 CloudTrail has each agent as the source identity of its events; every signature is a signature with the KMS key of that agent, every setting that a session reads is a setting of that agent, and no session reads a secret |
+| `make runtime-foreign [AGENT=agent-beta]` | Makes a second agent runtime with the image and the execution role of an agent, invokes it with the ID of an existing session of that agent, and deletes it. The default agent is the first agent of the stack | R1 the second agent runtime starts, and its runtime session has the credentials of the execution role of the agent. R2 IAM denies to that runtime session a JWT with the agent ID and the ID of the existing session. R3 by the policy simulator of IAM, the execution role gives the JWT of a session to the agent runtime of the agent, and not to a different agent runtime |
 | `make runtime-trail [RECORD=<file>]` | Changes nothing. Reads the log files of the trail for the session of the newest record of `make runtime-chain`, or of the record `RECORD` of a chain run, an agent run or a run with a hostile task | T1 the trail is logging for all Regions with log file validation, and its data events are the session table, the three functions, and the agent runtimes, the workspace and the gateway of AgentCore. T2 the management events of the session, with the agent as source identity, and the requests of the broker for credentials with the session tags. T3 the data events of the session table for the item of the session: the write of the session starter, the reads and the end of the session by the broker. T4 the invocations of the session starter and of the broker. T5 the requests of the session starter to the agent runtime with the session ID and, for a session of the LLM agent, the requests to the workspace of the microVM that requested a JWT with the session ID |
 | `make runtime-issue [USE_CASE=feature-flags]` | Opens an issue with the label `agentfarm` in the repository of a use case (`agentfarm-word-count`, or `agentfarm-feature-flags`) and follows the session that it starts | I1 the workflow ran, and the session table has the issue, who asked, and the hash of the text of the issue. I2 the work ends. I3 the change on the branch of the session, the other files and the workflows not changed, a commit with a signature of GitHub and the GitHub App as author, and the lines `Issue`, `Agent-Id`, `Session-Id` at the end of the commit message and of the pull request. I4 the stack. I5 the session ended itself. I6 CloudTrail has the role session `issue-<number>-run-<run ID>` of the workflow, and the session tags `issue` and `task_sha256` on every request of the broker for credentials |
 | `make runtime-merge PULL=<number> [USE_CASE=feature-flags]` | Changes nothing. Reads the result of a pull request of a session that a person merged | M1 the workflow `agentfarm-deploy` ran for the merge commit, and the agent did not merge. M2 the live stack has the merge commit as its tag and the values of the merged template. M3 the stack of the session and its parameters are not there. M4 CloudTrail has the deployment and the deletion with the deploy role and the role session `merge-<commit>`, and no other role changed the live stack |
@@ -358,6 +360,13 @@ corrected, and `make runtime-agent` finds nothing to change. Put the content of
   context key `aws:AgentCoreRuntimeSourceSid`, the runtime session ID. The policy of the execution
   role allows a JWT only with that value as the session ID. The stack sets the platform version V2:
   the documentation names V1 as the value when the property is absent.
+- **The execution role names its agent runtime.** A second agent runtime can have the same execution
+  role, and the caller of an agent runtime selects the runtime session ID. So the policy of the
+  execution role allows a JWT only when the context key `aws:AgentCoreRuntimeSourceArn` of the
+  credentials is the ARN of the agent runtime of the agent: a second agent runtime with the execution
+  role of an agent, invoked with the ID of an existing session of that agent, gets no JWT (R1 to R3).
+  The trust policy of the role cannot name the agent runtime, which needs the role before it exists:
+  the statements of the JWT are a policy of their own, which the stack makes after the agent runtime.
 - **The caller selects the runtime session ID.** AgentCore Runtime accepts every session ID of 33
   characters or more, also a text that is not a UUID, and it accepts the ID of a stopped session for
   a new microVM. So the session starter makes the session ID and writes it one time, and the broker
@@ -1005,8 +1014,15 @@ What these features give together:
   a package that the signing profile did not sign; a principal that can start a signing job with the
   profile can sign a different package. The ARNs of the agent runtimes are an environment variable
   of the session starter, not a setting of its signed package. The container image of the agent is
-  not signed: a different image gets JWTs only for its own agent and its own sessions. A principal
-  that can change the trust policy of the agent role needs no function.
+  not signed: a different image in the agent runtime of an agent gets JWTs only for that agent and its
+  own sessions. A principal that can change the trust policy of the agent role needs no function.
+- **A second agent runtime has the other permissions of the execution role.** A principal with
+  `bedrock-agentcore:CreateAgentRuntime` and `iam:PassRole` on the execution role of an agent can make
+  a second agent runtime with that role. It gets no JWT (R2), and so no request to the broker. It gets
+  the other permissions of the role: the model of the agent, the workspace, and a write to the log
+  of the agent runtime of the agent, the log of what the model asked and of what ran in the workspace.
+  Correction: the condition `aws:AgentCoreRuntimeSourceArn` on the statements of the model and of
+  the workspace, and a service control policy that lets only the deployment pass the execution roles.
 - **Test fields of the session starter.** An invocation without an alias can have the fields `mode`,
   `greeting`, `task` and `parameter_name`: a scripted work without a model, a different task text, or
   a scripted work that asks for an SSM parameter with a given name. The roles of the
